@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "RemarkableMenuBar",
+    name: "tinyreMarkable",
     platforms: [.macOS(.v13)],
     targets: [
         .executableTarget(
-            name: "RemarkableMenuBar",
-            path: "Sources/RemarkableMenuBar",
+            name: "tinyreMarkable",
+            path: "Sources/tinyreMarkable",
             resources: [
                 .copy("Resources/rmapi")
             ]

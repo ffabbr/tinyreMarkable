@@ -11,7 +11,7 @@ final class NotebookRenderer {
 
     private var appSupportDir: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return base.appendingPathComponent("RemarkableMenuBar", isDirectory: true)
+        return base.appendingPathComponent("tinyreMarkable", isDirectory: true)
     }
     private var venvDir: URL { appSupportDir.appendingPathComponent("venv", isDirectory: true) }
     private var rmcBinary: URL { venvDir.appendingPathComponent("bin/rmc") }

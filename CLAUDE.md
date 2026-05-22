@@ -1,4 +1,4 @@
-# RemarkableMenuBar
+# tinyreMarkable
 
 A macOS menu bar app to upload PDFs to a reMarkable tablet and download documents/notebooks as PDF (including page ranges), via the reMarkable cloud.
 
@@ -9,7 +9,7 @@ A macOS menu bar app to upload PDFs to a reMarkable tablet and download document
 
 ## Layout
 ```
-Sources/RemarkableMenuBar/
+Sources/tinyreMarkable/
   main.swift             NSApp bootstrap
   AppDelegate.swift      Status item, NSMenu, busy indicator, all actions
   RMClient.swift         rmapi process wrapper, auth bootstrap, error mapping

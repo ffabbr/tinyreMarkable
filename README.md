@@ -1,4 +1,4 @@
-# Remarkable Menu Bar
+# tinyreMarkable
 
 A macOS menu bar app for uploading PDFs to your reMarkable tablet and downloading
 documents/notebooks back as PDF — including single-page exports — via the
@@ -9,7 +9,7 @@ reMarkable cloud.
 - AppKit `NSStatusItem` + native `NSMenu` menu bar app. macOS 13+, arm64.
 - Talks to the reMarkable cloud through a bundled
   [`ddvk/rmapi`](https://github.com/ddvk/rmapi) binary
-  (`Sources/RemarkableMenuBar/Resources/rmapi`).
+  (`Sources/tinyreMarkable/Resources/rmapi`).
 - **Auth**: on launch it reuses the `devicetoken` from the official reMarkable
   Mac app (`~/Library/Containers/com.remarkable.desktop/.../com.remarkable.desktop.plist`),
   writing it to `~/Library/Application Support/rmapi/rmapi.conf`. If the desktop
@@ -36,7 +36,7 @@ Look for the reMarkable logo in the menu bar and click it.
 
 ```
 Package.swift
-Sources/RemarkableMenuBar/
+Sources/tinyreMarkable/
   main.swift             NSApp bootstrap
   AppDelegate.swift      status item, NSMenu, busy indicator, all actions
   RMClient.swift         rmapi process wrapper, auth + OTC pairing, error mapping
