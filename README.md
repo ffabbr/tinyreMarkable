@@ -1,8 +1,9 @@
-# tinyreMarkable
+# Tiny reMarkable
 
 A macOS menu bar app for uploading PDFs to your reMarkable tablet and downloading
 documents/notebooks back as PDF — including single-page exports — via the
-reMarkable cloud.
+reMarkable cloud. (Swift package / target name: `tinyreMarkable`; the shipped app
+is named **Tiny reMarkable**.)
 
 ## How it works
 
@@ -20,7 +21,14 @@ reMarkable cloud.
   (`rmc`: rm v6 → SVG, then SVG → PDF via headless `WKWebView`). Page rendering
   runs in parallel, and single-page exports render only the page you ask for.
 
-## Run
+## Install
+
+Grab the latest `.dmg` from [Releases](https://github.com/ffabbr/tinyreMarkable/releases),
+open it, and drag **Tiny reMarkable** to **Applications**. The app is unsigned, so
+on first launch right-click it → **Open** (or System Settings → Privacy & Security
+→ *Open Anyway*).
+
+## Run from source
 
     swift run
 
@@ -51,7 +59,13 @@ Sources/tinyreMarkable/
 
 - arm64 only. For Intel/universal, `lipo -create` the macos-arm64 and
   macos-intel rmapi releases into `Resources/rmapi`.
-- No code signing — runs via `swift run`. A real `.app` would need an Xcode
-  project for entitlements/signing.
+- No code signing/notarization, so users must right-click → Open on first launch.
 - Handwritten-notebook rendering needs Python 3.10+ (the `rmc` venv is
   auto-installed once on first notebook export).
+
+## Packaging a release
+
+`packaging/package.sh [version]` builds the release binary, assembles
+`Tiny reMarkable.app` (with the generated `AppIcon.icns`), and produces a styled
+DMG installer under the SwiftPM release bin path. `packaging/make_icon.swift`
+regenerates the icon (reMarkable logo on `#f9f6f1`).

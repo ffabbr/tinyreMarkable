@@ -29,3 +29,4 @@ Sources/tinyreMarkable/
 ## Notes
 - arm64 only; for Intel/universal, `lipo` together both macos releases into `Resources/rmapi`.
 - No code signing — runs via `swift run`. A real `.app` would need an Xcode project for entitlements/signing.
+- **Packaging**: `packaging/package.sh [version]` builds `Tiny reMarkable.app` (display name; internal target stays `tinyreMarkable` since `Bundle.module` keys off the executable/bundle name) and a styled DMG. The resource bundle is copied to the `.app` root because `Bundle.module` resolves it at `Bundle.main.bundleURL`. `packaging/make_icon.swift` renders the icon.

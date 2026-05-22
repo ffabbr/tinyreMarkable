@@ -11,3 +11,7 @@ DerivedData/
 
 # macOS
 .DS_Store
+
+# Packaging artifacts
+*.dmg
+packaging/*.iconset
