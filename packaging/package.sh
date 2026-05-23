@@ -7,10 +7,9 @@ VERSION="${1:-1.0.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-# Display name (Finder/app), and internal names that Bundle.module depends on.
+# Display name (Finder/app) and the internal executable name.
 APP_NAME="Tiny reMarkable"
 EXE="tinyreMarkable"
-RES_BUNDLE="tinyreMarkable_tinyreMarkable.bundle"
 VOL="Tiny reMarkable Installer"
 
 swift build -c release
@@ -24,8 +23,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/$EXE" "$APP/Contents/MacOS/$EXE"
 cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
-# Bundle.module looks for the resource bundle at Bundle.main.bundleURL (the .app root).
-cp -R "$BIN/$RES_BUNDLE" "$APP/$RES_BUNDLE"
+# No bundled resources: rmapi is downloaded on first use into ~/Library/Application Support.
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

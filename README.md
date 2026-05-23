@@ -7,10 +7,12 @@ is named **Tiny reMarkable**.)
 
 ## How it works
 
-- AppKit `NSStatusItem` + native `NSMenu` menu bar app. macOS 13+, arm64.
-- Talks to the reMarkable cloud through a bundled
-  [`ddvk/rmapi`](https://github.com/ddvk/rmapi) binary
-  (`Sources/tinyreMarkable/Resources/rmapi`).
+- AppKit `NSStatusItem` + native `NSMenu` menu bar app. macOS 13+ (Apple Silicon & Intel).
+- Talks to the reMarkable cloud through [`ddvk/rmapi`](https://github.com/ddvk/rmapi).
+  The binary isn't bundled — on the first cloud action the app downloads the
+  matching release for your Mac's architecture from ddvk/rmapi's GitHub releases
+  and caches it in `~/Library/Application Support/tinyreMarkable/bin/`. This means
+  rmapi updates are picked up automatically, without a new app release.
 - **Auth**: on launch it reuses the `devicetoken` from the official reMarkable
   Mac app (`~/Library/Containers/com.remarkable.desktop/.../com.remarkable.desktop.plist`),
   writing it to `~/Library/Application Support/rmapi/rmapi.conf`. If the desktop
@@ -52,13 +54,15 @@ Sources/tinyreMarkable/
   NotebookRenderer.swift rmc venv setup + .rm → SVG → PDF pipeline (parallel)
   PDFSlicer.swift        PDFKit page extraction
   Models.swift           RMItem
-  Resources/rmapi        bundled ddvk/rmapi binary (arm64)
 ```
+(rmapi is downloaded at runtime, so there's no bundled `Resources/`.)
 
 ## Notes
 
-- arm64 only. For Intel/universal, `lipo -create` the macos-arm64 and
-  macos-intel rmapi releases into `Resources/rmapi`.
+- Works on both Apple Silicon and Intel: the right rmapi build is fetched per-arch
+  at runtime, so no `lipo`/universal binary is needed. (The app itself is built
+  arm64 by `package.sh`; build for Intel separately if you need an Intel `.app`.)
+- First cloud action needs an internet connection to download rmapi (one-time, cached).
 - No code signing/notarization, so users must right-click → Open on first launch.
 - Handwritten-notebook rendering needs Python 3.10+ (the `rmc` venv is
   auto-installed once on first notebook export).

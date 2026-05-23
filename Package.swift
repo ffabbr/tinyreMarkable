@@ -7,10 +7,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "tinyreMarkable",
-            path: "Sources/tinyreMarkable",
-            resources: [
-                .copy("Resources/rmapi")
-            ]
+            path: "Sources/tinyreMarkable"
         )
     ]
 )
