@@ -46,6 +46,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# Ad-hoc code-sign the bundle. We have no Developer ID, but an ad-hoc signature
+# (identity "-") is enough that Gatekeeper offers the normal "unidentified
+# developer → Open Anyway" flow instead of the dead-end "app is damaged" error
+# that unsigned bundles trigger once quarantined. Sign inner executables first.
+echo "==> Ad-hoc code-signing $APP"
+codesign --force --timestamp=none --sign - "$APP/Contents/MacOS/$EXE"
+codesign --force --timestamp=none --sign - "$APP"
+codesign --verify --strict --verbose=2 "$APP" 2>&1 | tail -2
+
 echo "==> Building DMG"
 WORK="$BIN/dmg-stage"
 DMG_TMP="$BIN/$EXE-rw.dmg"

@@ -26,9 +26,16 @@ is named **Tiny reMarkable**.)
 ## Install
 
 Grab the latest `.dmg` from [Releases](https://github.com/ffabbr/tinyreMarkable/releases),
-open it, and drag **Tiny reMarkable** to **Applications**. The app is unsigned, so
-on first launch right-click it → **Open** (or System Settings → Privacy & Security
-→ *Open Anyway*).
+open it, and drag **Tiny reMarkable** to **Applications**.
+
+The app is only ad-hoc signed (no paid Apple Developer ID), so Gatekeeper will
+warn on first launch. Right-click the app → **Open**, then confirm (or System
+Settings → Privacy & Security → *Open Anyway*). If macOS instead claims the app
+is *"damaged and can't be opened"*, clear the download-quarantine flag once:
+
+    xattr -dr com.apple.quarantine "/Applications/Tiny reMarkable.app"
+
+then open it normally.
 
 ## Run from source
 
