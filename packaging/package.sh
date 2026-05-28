@@ -68,7 +68,20 @@ ln -s /Applications "$WORK/Applications"
 hdiutil create -srcfolder "$WORK" -volname "$VOL" -fs HFS+ -format UDRW -ov "$DMG_TMP" >/dev/null
 hdiutil attach "$DMG_TMP" -nobrowse -mountpoint "$MNT" >/dev/null
 
-osascript <<APPLESCRIPT
+# Apply the cached Finder layout (icon positions, window bounds, icon size).
+# Regenerating it requires Finder automation, which fails in non-interactive
+# environments; the committed cache makes styling deterministic and CI-safe.
+# To re-record the layout: delete packaging/dmg_DS_Store and re-run this script
+# in an interactive Terminal session that has "System Events"/Finder
+# automation permission, which will trigger the AppleScript fallback below
+# and write the resulting .DS_Store back to the cache.
+DS_CACHE="$ROOT/packaging/dmg_DS_Store"
+if [ -f "$DS_CACHE" ]; then
+  cp "$DS_CACHE" "$MNT/.DS_Store"
+  sync
+else
+  echo "==> No cached DS_Store; styling via Finder (requires automation permission)"
+  osascript <<APPLESCRIPT
 tell application "Finder"
   tell disk "$VOL"
     open
@@ -87,8 +100,9 @@ tell application "Finder"
   end tell
 end tell
 APPLESCRIPT
-sync
-cp "$MNT/.DS_Store" "$ROOT/packaging/dmg_DS_Store" 2>/dev/null || true
+  sync
+  cp "$MNT/.DS_Store" "$DS_CACHE" 2>/dev/null || true
+fi
 
 # Robust detach: force, bounded retry (the volume is briefly busy after Finder closes).
 for _ in $(seq 1 12); do
