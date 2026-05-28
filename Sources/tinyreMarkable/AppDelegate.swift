@@ -1,4 +1,6 @@
 import AppKit
+import PDFKit
+import UniformTypeIdentifiers
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -334,7 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let remoteFolder = sender.representedObject as? String else { return }
         NSApp.activate(ignoringOtherApps: true)
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.pdf]
+        panel.allowedContentTypes = [.pdf, .image]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
@@ -344,7 +346,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         currentTask = Task {
             defer { endBusy() }
             do {
-                try await client.upload(localFile: url, remoteFolder: remoteFolder)
+                let uploadURL: URL
+                if Self.isImage(url) {
+                    setBusyTooltip("Converting image to PDF…")
+                    uploadURL = try Self.makePDF(fromImage: url)
+                } else {
+                    uploadURL = url
+                }
+                try await client.upload(localFile: uploadURL, remoteFolder: remoteFolder)
                 childCache.removeValue(forKey: remoteFolder)
                 populated.removeAll()
                 rebuildRootMenu()
@@ -533,6 +542,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : text
+    }
+
+    /// True if `url` looks like an image we can wrap in a PDF.
+    private static func isImage(_ url: URL) -> Bool {
+        if let type = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType {
+            return type.conforms(to: .image)
+        }
+        return false
+    }
+
+    /// Wrap an image file in a single-page PDF (page size = image size) and return
+    /// the new file's URL in a temporary directory. Filename is `<image-basename>.pdf`.
+    private static func makePDF(fromImage url: URL) throws -> URL {
+        guard let image = NSImage(contentsOf: url), let page = PDFPage(image: image) else {
+            throw NSError(domain: "tinyreMarkable", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "Could not read the selected image."
+            ])
+        }
+        let doc = PDFDocument()
+        doc.insert(page, at: 0)
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("remarkable-mac-img-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dst = dir.appendingPathComponent(url.deletingPathExtension().lastPathComponent + ".pdf")
+        guard doc.write(to: dst) else {
+            throw NSError(domain: "tinyreMarkable", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "Could not write the converted PDF."
+            ])
+        }
+        return dst
     }
 
     private func showError(_ error: Error) {
