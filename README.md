@@ -1,7 +1,7 @@
 # Tiny reMarkable
 
 A macOS menu bar app for uploading PDFs to your reMarkable tablet and downloading
-documents/notebooks back as PDF — including single-page exports — via the
+documents/notebooks back as PDF, including single-page exports via the
 reMarkable cloud. (Swift package / target name: `tinyreMarkable`; the shipped app
 is named **Tiny reMarkable**.)
 
@@ -43,7 +43,7 @@ then open it normally.
 
 Look for the reMarkable logo in the menu bar and click it.
 
-- **Upload PDF to …** — pick a PDF; it's uploaded to that folder.
+- **Upload PDF to …**, pick a PDF; it's uploaded to that folder.
 - Per document: **Save as PDF (all pages)**, or export the **first / last /
   second-to-last** page, or **Other ▸** to pick any single page.
 - While an operation is running, a busy bar shows in the menu bar and the menu
