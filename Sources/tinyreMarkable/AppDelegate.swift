@@ -150,54 +150,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loading.isEnabled = false
         menu.addItem(loading)
 
-        // Fetch (use cache if available)
-        if let cached = childCache[path] {
-            insertChildren(cached, into: menu, parentPath: path, isRoot: isRoot, loadingPlaceholder: loading)
-        } else {
-            Task { [weak self] in
-                guard let self else { return }
-                do {
-                    let items = try await self.client.list(path: path)
-                    self.childCache[path] = items
-                    if menu.items.contains(loading) {
-                        self.insertChildren(items, into: menu, parentPath: path, isRoot: isRoot, loadingPlaceholder: loading)
-                    }
-                } catch {
-                    self.client.lastError = error.localizedDescription
-                    if menu.items.contains(loading) {
-                        loading.title = "Error: \(error.localizedDescription)"
-                    }
-                }
-            }
-        }
-    }
-
-    private func insertChildren(_ items: [RMItem], into menu: NSMenu, parentPath: String, isRoot: Bool, loadingPlaceholder: NSMenuItem) {
-        if menu.items.contains(loadingPlaceholder) {
-            menu.removeItem(loadingPlaceholder)
-        }
-
-        if items.isEmpty {
-            let empty = NSMenuItem(title: "(empty)", action: nil, keyEquivalent: "")
-            empty.isEnabled = false
-            menu.addItem(empty)
-        }
-
-        for item in items {
-            let menuItem = NSMenuItem(title: item.name, action: nil, keyEquivalent: "")
-            switch item.kind {
-            case .folder:
-                menuItem.image = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)
-                let sub = NSMenu(title: item.name)
-                configureFolderMenu(sub, path: item.id, isRoot: false)
-                menuItem.submenu = sub
-            case .document:
-                menuItem.image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)
-                menuItem.submenu = makeDocumentMenu(for: item)
-            }
-            menu.addItem(menuItem)
-        }
-
+        // Add the bottom-anchored items NOW (separator + Refresh/Account/Quit for root).
+        // Doing this up-front means the menu's full vertical structure is known at first
+        // display; the async fetch only replaces the Loading row with children — a pure
+        // mid-menu swap. If we waited to append these after the async, NSMenu wouldn't
+        // fully reflow its window height while the menu is on screen, leaving a stale
+        // blank row at the bottom until the user closed and reopened.
         if isRoot {
             menu.addItem(.separator())
 
@@ -215,6 +173,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let quit = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             menu.addItem(quit)
         }
+
+        // Fetch (use cache if available)
+        if let cached = childCache[path] {
+            replaceLoadingWithChildren(cached, in: menu, parentPath: path, loadingPlaceholder: loading)
+        } else {
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    let items = try await self.client.list(path: path)
+                    self.childCache[path] = items
+                    if menu.items.contains(loading) {
+                        self.replaceLoadingWithChildren(items, in: menu, parentPath: path, loadingPlaceholder: loading)
+                    }
+                } catch {
+                    self.client.lastError = error.localizedDescription
+                    if menu.items.contains(loading) {
+                        loading.title = "Error: \(error.localizedDescription)"
+                    }
+                }
+            }
+        }
+    }
+
+    /// Insert child items at the Loading placeholder's position, then remove the placeholder.
+    /// The trailing Refresh/Account/Quit section is already in place (added by `populateFolderMenu`),
+    /// so this is a pure middle-of-menu replacement.
+    private func replaceLoadingWithChildren(_ items: [RMItem], in menu: NSMenu, parentPath: String, loadingPlaceholder: NSMenuItem) {
+        let insertIndex = menu.index(of: loadingPlaceholder)
+        guard insertIndex >= 0 else { return }
+
+        var offset = insertIndex
+        if items.isEmpty {
+            let empty = NSMenuItem(title: "(empty)", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.insertItem(empty, at: offset)
+            offset += 1
+        } else {
+            for item in items {
+                let menuItem = NSMenuItem(title: item.name, action: nil, keyEquivalent: "")
+                switch item.kind {
+                case .folder:
+                    menuItem.image = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)
+                    let sub = NSMenu(title: item.name)
+                    configureFolderMenu(sub, path: item.id, isRoot: false)
+                    menuItem.submenu = sub
+                case .document:
+                    menuItem.image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)
+                    menuItem.submenu = makeDocumentMenu(for: item)
+                }
+                menu.insertItem(menuItem, at: offset)
+                offset += 1
+            }
+        }
+
+        menu.removeItem(loadingPlaceholder)
     }
 
     /// Builds the per-document submenu: save-all plus single-page exports.
