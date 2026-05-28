@@ -414,6 +414,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let source = try await client.makePDF(from: prepared, pageIndices: [idx], destinationDir: dir) { [weak self] msg in
                     self?.setBusyTooltip(msg)
                 }
+                // Flash success before the save panel: the work is done, and we
+                // don't want any menu-bar animation while the panel is up.
+                pendingSuccess = true
                 endBusy()
 
                 let base = (req.remotePath as NSString).lastPathComponent
@@ -426,7 +429,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     // makePDF rendered exactly this page; it's already a single-page PDF.
                     try copy(source, to: dst)
                 }
-                pendingSuccess = true
             } catch {
                 showError(error)
             }
@@ -441,10 +443,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let pdf = try await client.makePDF(from: prepared, pageIndices: nil, destinationDir: dir) { [weak self] msg in
                 self?.setBusyTooltip(msg)
             }
+            // Flash success before the save panel: the download is done, and we
+            // don't want any menu-bar animation while the panel is up.
+            pendingSuccess = true
             endBusy()
             guard let dst = savePanel(suggestedName: ((remotePath as NSString).lastPathComponent) + ".pdf") else { return }
             try copy(pdf, to: dst)
-            pendingSuccess = true
         } catch {
             showError(error)
         }
@@ -501,7 +505,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func endBusy() {
-        busyDepth = max(0, busyDepth - 1)
+        // Idempotent: extra calls (e.g. a `defer { endBusy() }` after an
+        // explicit pre-save-panel `endBusy()`) become no-ops so they don't
+        // overwrite the success flash with the idle logo.
+        guard busyDepth > 0 else { return }
+        busyDepth -= 1
         guard busyDepth == 0 else { return }
         hideCancelItem()
         currentTask = nil
