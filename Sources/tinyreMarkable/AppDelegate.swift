@@ -27,6 +27,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var currentTask: Task<Void, Never>?
     private var cancelMenuItems: [NSMenuItem] = []
 
+    /// Set to true by a task right before it completes successfully; consumed by
+    /// `endBusy()`, which then flashes a checkmark instead of restoring the logo
+    /// immediately. Avoids threading a "result" through every defer.
+    private var pendingSuccess: Bool = false
+    /// In-flight "restore the logo after the flash" task, so a new operation
+    /// starting mid-flash cancels the restore cleanly.
+    private var successFlashTask: Task<Void, Never>?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         try? client.bootstrapAuthIfNeeded()
 
@@ -35,6 +43,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let image = Self.makeStatusItemImage()
             button.image = image
             self.idleImage = image
+
+            let drag = DragReceivingView(frame: button.bounds)
+            drag.autoresizingMask = [.width, .height]
+            drag.onDrop = { [weak self] url in
+                self?.performUpload(localURL: url, remoteFolder: "/")
+            }
+            button.addSubview(drag)
         }
         self.statusItem = statusItem
 
@@ -326,6 +341,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 prepareDirs.removeAll()
                 populated.removeAll()
                 rebuildRootMenu()
+                pendingSuccess = true
             } catch {
                 showError(error)
             }
@@ -342,21 +358,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panel.canChooseFiles = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
+        performUpload(localURL: url, remoteFolder: remoteFolder)
+    }
+
+    /// Run the upload pipeline for a local file (PDF or image): convert images to
+    /// PDF if needed, push to `remoteFolder`, then invalidate caches and rebuild.
+    private func performUpload(localURL: URL, remoteFolder: String) {
         beginBusy()
         currentTask = Task {
             defer { endBusy() }
             do {
                 let uploadURL: URL
-                if Self.isImage(url) {
+                if Self.isImage(localURL) {
                     setBusyTooltip("Converting image to PDF…")
-                    uploadURL = try Self.makePDF(fromImage: url)
+                    uploadURL = try Self.makePDF(fromImage: localURL)
                 } else {
-                    uploadURL = url
+                    uploadURL = localURL
                 }
                 try await client.upload(localFile: uploadURL, remoteFolder: remoteFolder)
                 childCache.removeValue(forKey: remoteFolder)
                 populated.removeAll()
                 rebuildRootMenu()
+                pendingSuccess = true
             } catch {
                 showError(error)
             }
@@ -403,6 +426,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     // makePDF rendered exactly this page; it's already a single-page PDF.
                     try copy(source, to: dst)
                 }
+                pendingSuccess = true
             } catch {
                 showError(error)
             }
@@ -420,6 +444,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             endBusy()
             guard let dst = savePanel(suggestedName: ((remotePath as NSString).lastPathComponent) + ".pdf") else { return }
             try copy(pdf, to: dst)
+            pendingSuccess = true
         } catch {
             showError(error)
         }
@@ -453,6 +478,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func beginBusy() {
         busyDepth += 1
         guard busyDepth == 1, let button = statusItem.button else { return }
+        // A new operation supersedes any lingering success flash.
+        successFlashTask?.cancel()
+        successFlashTask = nil
         showCancelItem()
         // Widen the status item so the indeterminate bar isn't clipped.
         let barWidth: CGFloat = 60
@@ -481,10 +509,102 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         busyIndicator?.removeFromSuperview()
         busyIndicator = nil
         if let button = statusItem.button {
-            button.image = idleImage
             button.toolTip = nil
         }
         statusItem.length = NSStatusItem.variableLength
+
+        let success = pendingSuccess
+        pendingSuccess = false
+        if success {
+            flashSuccess()
+        } else {
+            statusItem.button?.image = idleImage
+        }
+    }
+
+    /// Briefly swap the status item image for a checkmark, then transition back
+    /// to the reMarkable logo via a scale-down → swap → scale-up animation.
+    /// Cancelled by `beginBusy` if a new operation supersedes it.
+    private func flashSuccess() {
+        guard let button = statusItem.button else { return }
+        button.wantsLayer = true
+        guard let layer = button.layer else { return }
+
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        let check = NSImage(systemSymbolName: "checkmark",
+                            accessibilityDescription: "Success")?
+            .withSymbolConfiguration(config)
+        check?.isTemplate = true
+        button.image = check
+
+        // Entry: scale up from a small size around the layer's center.
+        // We don't change the layer's anchorPoint (AppKit fights us on it);
+        // instead the scale is baked into a center-pivoting transform matrix.
+        let entryScale = CABasicAnimation(keyPath: "transform")
+        entryScale.fromValue = NSValue(caTransform3D: Self.centeredScale(0.4, in: layer))
+        entryScale.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+        entryScale.duration = 0.18
+        entryScale.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.add(entryScale, forKey: "successEntryScale")
+
+        let entryFade = CABasicAnimation(keyPath: "opacity")
+        entryFade.fromValue = 0.0
+        entryFade.toValue = 1.0
+        entryFade.duration = 0.18
+        layer.add(entryFade, forKey: "successEntryFade")
+
+        successFlashTask = Task { [weak self] in
+            // Hold the checkmark at full size.
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled, let self,
+                  let button = self.statusItem.button,
+                  let layer = button.layer else { return }
+
+            let shrunk = Self.centeredScale(0.4, in: layer)
+
+            // Shrink the checkmark (hold the shrunk state so it doesn't snap back
+            // before we swap the image).
+            let shrink = CABasicAnimation(keyPath: "transform")
+            shrink.fromValue = NSValue(caTransform3D: CATransform3DIdentity)
+            shrink.toValue = NSValue(caTransform3D: shrunk)
+            shrink.duration = 0.13
+            shrink.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            shrink.fillMode = .forwards
+            shrink.isRemovedOnCompletion = false
+            layer.add(shrink, forKey: "successShrink")
+
+            try? await Task.sleep(nanoseconds: 130_000_000)
+            guard !Task.isCancelled,
+                  let button = self.statusItem.button,
+                  let layer = button.layer else { return }
+
+            // Swap to logo and scale back up.
+            button.image = self.idleImage
+            layer.removeAnimation(forKey: "successShrink")
+            let grow = CABasicAnimation(keyPath: "transform")
+            grow.fromValue = NSValue(caTransform3D: shrunk)
+            grow.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+            grow.duration = 0.18
+            grow.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            layer.add(grow, forKey: "successGrow")
+
+            self.successFlashTask = nil
+        }
+    }
+
+    /// Build a uniform-scale transform that pivots around the layer's visual
+    /// center, regardless of the layer's anchorPoint. Used because
+    /// `NSStatusBarButton`'s AppKit-managed layer resets anchorPoint changes
+    /// during layout, so a plain `transform.scale` animation pins to the
+    /// bottom-left corner instead of the middle.
+    private static func centeredScale(_ s: CGFloat, in layer: CALayer) -> CATransform3D {
+        let cx = layer.bounds.width / 2
+        let cy = layer.bounds.height / 2
+        var t = CATransform3DIdentity
+        t = CATransform3DTranslate(t, cx, cy, 0)
+        t = CATransform3DScale(t, s, s, 1)
+        t = CATransform3DTranslate(t, -cx, -cy, 0)
+        return t
     }
 
     private func setBusyTooltip(_ message: String) {
@@ -590,6 +710,56 @@ private enum AssociatedKeys {
     static var folderPath = 0
     static var isRoot = 0
     static var pageListPath = 0
+}
+
+/// Transparent overlay sitting on top of the status item button that accepts
+/// dragged PDF/image files. `hitTest` returns nil so clicks fall through to the
+/// button (which opens the menu); the window resolves drag destinations by the
+/// registered view's frame independently of hit testing.
+@MainActor
+final class DragReceivingView: NSView {
+    var onDrop: ((URL) -> Void)?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        registerForDraggedTypes([.fileURL])
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    nonisolated override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        MainActor.assumeIsolated {
+            acceptableURL(from: sender) != nil ? .copy : []
+        }
+    }
+
+    nonisolated override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        MainActor.assumeIsolated {
+            acceptableURL(from: sender) != nil ? .copy : []
+        }
+    }
+
+    nonisolated override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        MainActor.assumeIsolated {
+            guard let url = acceptableURL(from: sender) else { return false }
+            onDrop?(url)
+            return true
+        }
+    }
+
+    private func acceptableURL(from sender: NSDraggingInfo) -> URL? {
+        let urls = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] ?? []
+        return urls.first(where: { url in
+            guard let type = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType else {
+                return false
+            }
+            return type.conforms(to: .pdf) || type.conforms(to: .image)
+        })
+    }
 }
 
 /// A request to export a single page of a document. `resolve` maps the (later-known)

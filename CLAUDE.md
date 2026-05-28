@@ -29,5 +29,5 @@ Sources/tinyreMarkable/
 
 ## Notes
 - The app build is arm64, but rmapi is fetched per-arch at runtime, so an Intel Mac gets the Intel rmapi automatically — no `lipo` needed.
-- No code signing — runs via `swift run`. A real `.app` would need an Xcode project for entitlements/signing.
-- **Packaging**: `packaging/package.sh [version]` builds `Tiny reMarkable.app` (display name; internal target stays `tinyreMarkable`) and a styled DMG. There are no bundled resources to copy anymore (rmapi is downloaded on first use). `packaging/make_icon.swift` renders the icon.
+- Dev workflow (`swift run`) uses no code signing. Packaged builds are ad-hoc signed (identity `-`) in `package.sh` so Gatekeeper offers the normal "Open Anyway" flow rather than the "app is damaged" dead-end that unsigned + quarantined bundles trigger. Real Developer ID signing would still need an Xcode project for entitlements.
+- **Packaging**: `packaging/package.sh [version]` builds `Tiny reMarkable.app` (display name; internal target stays `tinyreMarkable`), ad-hoc signs it, and produces a styled DMG. There are no bundled resources to copy (rmapi is downloaded on first use). `packaging/make_icon.swift` renders the icon.
