@@ -1,9 +1,10 @@
 # Tiny reMarkable
 
 A macOS menu bar app for uploading PDFs to your reMarkable tablet and downloading
-documents/notebooks back as PDF, including single-page exports via the
-reMarkable cloud. (Swift package / target name: `tinyreMarkable`; the shipped app
-is named **Tiny reMarkable**.)
+documents/notebooks back as PDF, including single-page exports, via the
+reMarkable cloud. Handwritten annotations you made on top of an uploaded PDF are
+included in the exported PDF. (Swift package / target name: `tinyreMarkable`; the
+shipped app is named **Tiny reMarkable**.)
 
 ## How it works
 
@@ -18,10 +19,17 @@ is named **Tiny reMarkable**.)
   writing it to `~/Library/Application Support/rmapi/rmapi.conf`. If the desktop
   app isn't installed, the menu shows **Sign in to reMarkable…**, which opens
   my.remarkable.com and pairs with an 8-character one-time code.
-- **Download**: `rmapi get` fetches the archive; uploaded docs use the embedded
-  source PDF, while pure handwritten notebooks are rendered locally
-  (`rmc`: rm v6 → SVG, then SVG → PDF via headless `WKWebView`). Page rendering
-  runs in parallel, and single-page exports render only the page you ask for.
+- **Download**: `rmapi get` fetches the archive, then the export depends on what
+  the document is:
+  - a plain uploaded PDF (no handwriting) is exported as-is — lossless and fast;
+  - an uploaded PDF you wrote on has its ink rendered locally (`rmc`: rm v6 → SVG,
+    then SVG → PDF via headless `WKWebView`) and composited onto each source page,
+    sized and positioned to match what you saw on the tablet (portrait and
+    landscape);
+  - a pure handwritten notebook is rendered the same way, page by page.
+
+  Page rendering runs in parallel, and single-page exports only render the page
+  you ask for.
 
 ## Install
 
@@ -57,8 +65,8 @@ Sources/tinyreMarkable/
   main.swift             NSApp bootstrap
   AppDelegate.swift      status item, NSMenu, busy indicator, all actions
   RMClient.swift         rmapi process wrapper, auth + OTC pairing, error mapping
-  RMArchive.swift        parses the unzipped rmapi archive
-  NotebookRenderer.swift rmc venv setup + .rm → SVG → PDF pipeline (parallel)
+  RMArchive.swift        parses the unzipped rmapi archive (pages, embedded PDF, orientation)
+  NotebookRenderer.swift rmc venv setup + .rm → SVG → PDF pipeline (parallel); annotation compositing
   PDFSlicer.swift        PDFKit page extraction
   Models.swift           RMItem
 ```
@@ -71,8 +79,8 @@ Sources/tinyreMarkable/
   arm64 by `package.sh`; build for Intel separately if you need an Intel `.app`.)
 - First cloud action needs an internet connection to download rmapi (one-time, cached).
 - No code signing/notarization, so users must right-click → Open on first launch.
-- Handwritten-notebook rendering needs Python 3.10+ (the `rmc` venv is
-  auto-installed once on first notebook export).
+- Handwriting rendering (annotated PDFs and pure notebooks) needs Python 3.10+
+  (the `rmc` venv is auto-installed once, on the first export that contains ink).
 
 ## Packaging a release
 
