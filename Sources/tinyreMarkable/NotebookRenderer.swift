@@ -169,43 +169,37 @@ final class NotebookRenderer {
     }
 
     /// Affine transform mapping the rmc-rendered ink overlay onto the source PDF page,
-    /// reproducing how the reMarkable lays the document out on its screen.
+    /// reproducing how the reMarkable places annotations over the document.
     ///
-    /// rmc emits ink in PDF points in the device's *portrait* frame: x centered at 0
-    /// (page middle), y from the top, the full screen being `canvasW × canvasH`. The
-    /// overlay PDF page spans the SVG `viewBox`, so overlay point `(ox, oy)` (y-up,
-    /// origin bottom-left) corresponds to device point
-    ///   u = viewBox.minX + ox,  v = (viewBox.minY + height) − oy   (v measured from top).
+    /// rmc emits ink in PDF points (the strokes are already stored upright — landscape
+    /// ink is *not* rotated), with x centered at 0 and y measured from the top of the
+    /// page. The overlay PDF page spans the SVG `viewBox`, so overlay point `(ox, oy)`
+    /// (y-up, origin bottom-left) corresponds to device point
+    ///   u = viewBox.minX + ox,  v = (viewBox.minY + height) − oy   (v from the top).
     ///
-    /// The device frame maps onto the page differently per orientation:
-    /// - **Portrait**: the page is fit to the screen *width* (`pageW / canvasW`) and
-    ///   anchored top-left; the page is generally taller than one screen and scrolls.
-    /// - **Landscape**: the page is rotated 90° clockwise, its width fit to the screen's
-    ///   *long* axis (`pageW / canvasH`) and centered on the short axis.
+    /// Empirically (verified by overlaying real annotated downloads — answers landing in
+    /// the right table cells, a checkmark on the right module, etc.) the ink maps to the
+    /// page at **1:1 scale with no rotation**, differing only in horizontal anchoring:
+    /// - **Portrait**: device x = 0 sits at the screen's mid-line, so the page's left
+    ///   edge is half a screen-width to the left → shift x by `canvasW / 2`.
+    /// - **Landscape**: the page is shifted right by a full screen-height (`canvasH`).
     ///
-    /// Each step is affine, so we compose them by mapping three overlay basis points.
+    /// y maps straight through (device top = page top), so multi-screen-tall annotations
+    /// keep their absolute vertical position. The mapping is affine; we build it by
+    /// sending three overlay basis points through `map`.
     static func annotationTransform(viewBox: CGRect, overlaySize: CGSize,
                                     pageW: CGFloat, pageH: CGFloat,
                                     landscape: Bool) -> CGAffineTransform {
         let canvasW = rmScreenW * rmScale
         let canvasH = rmScreenH * rmScale
         let overlayTop = viewBox.minY + overlaySize.height
+        let shiftX = landscape ? canvasH : canvasW / 2
 
-        // overlay (ox, oy) → source-PDF point (y-up).
+        // overlay (ox, oy) → source-PDF point (y-up). 1:1 scale, x re-anchored, y direct.
         func map(_ ox: CGFloat, _ oy: CGFloat) -> CGPoint {
             let u = viewBox.minX + ox          // device x, centered at 0
             let v = overlayTop - oy            // device y, from the top
-            let px: CGFloat, pyt: CGFloat      // page point, y from the top
-            if landscape {
-                let s = pageW / canvasH
-                px = pageW / 2 - (v - canvasH / 2) * s
-                pyt = pageH / 2 + u * s
-            } else {
-                let s = pageW / canvasW
-                px = (u + canvasW / 2) * s
-                pyt = v * s
-            }
-            return CGPoint(x: px, y: pageH - pyt)
+            return CGPoint(x: u + shiftX, y: pageH - v)
         }
 
         let o = map(0, 0), x = map(1, 0), y = map(0, 1)
