@@ -54,19 +54,43 @@ enum RMError: LocalizedError {
     /// Map the raw rmapi stderr/stdout into a friendly error.
     static func from(rmapiOutput output: String) -> RMError {
         let lower = output.lowercased()
-        if lower.contains("no such host")
-            || lower.contains("dial tcp")
-            || lower.contains("network is unreachable")
-            || lower.contains("no route to host")
-            || lower.contains("connection refused")
-            || lower.contains("i/o timeout") {
+        // Network failures, in all the phrasings Go's net stack / macOS resolver emit
+        // when there's no connectivity. Checked first because rmapi's token refresh
+        // fails the same way offline as it does with a dead token, and we don't want
+        // to misreport "no internet" as "session expired".
+        let offlineMarkers = [
+            "no such host",
+            "dial tcp",
+            "network is unreachable",
+            "network is down",
+            "no route to host",
+            "connection refused",
+            "connection reset",
+            "i/o timeout",
+            "operation timed out",
+            "timeout exceeded",
+            "context deadline exceeded",
+            "tls handshake",
+            "server misbehaving",
+            "nodename nor servname",      // macOS getaddrinfo, no DNS
+            "name resolution",
+            "could not resolve",
+            "temporary failure",
+            "lookup ",                    // DNS lookup failures: "lookup <host>: ..."
+        ]
+        if offlineMarkers.contains(where: lower.contains) {
             return .offline
         }
-        if lower.contains("failed to create user token")
-            || lower.contains("unauthorized")
+        // A *definitive* auth signal means the session is genuinely dead. A bare
+        // "failed to create user token" without one of these is almost always the
+        // offline case above (the refresh couldn't reach the server), so don't
+        // treat it as expiry on its own.
+        if lower.contains("unauthorized")
             || lower.contains("401")
+            || lower.contains("403")
             || lower.contains("token is expired")
-            || lower.contains("invalid token") {
+            || lower.contains("invalid token")
+            || lower.contains("invalid grant") {
             return .authExpired
         }
         if lower.contains("does not contain a unique pagedata")
