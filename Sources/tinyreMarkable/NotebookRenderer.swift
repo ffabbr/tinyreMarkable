@@ -105,11 +105,6 @@ final class NotebookRenderer {
             throw NSError(domain: "NotebookRenderer", code: 21, userInfo: [NSLocalizedDescriptionKey: "Could not create the output PDF."])
         }
 
-        // Device canvas in PDF points, and its aspect ratio.
-        let canvasW = Self.rmScreenW * Self.rmScale
-        let canvasH = Self.rmScreenH * Self.rmScale
-        let deviceAspect = Self.rmScreenW / Self.rmScreenH
-
         var completed = 0
         for pageIndex in targets {
             try Task.checkCancellation()
@@ -136,19 +131,15 @@ final class NotebookRenderer {
                    let overlayDoc = CGPDFDocument(CGDataProvider(data: overlayData as CFData)!),
                    let overlayPage = overlayDoc.page(at: 1),
                    let viewBox = svgViewBox(svg) {
-                    // The reMarkable fits the PDF to its screen by the dominant edge
-                    // (height for portrait, width for landscape) and top-left-aligns it.
-                    // `s` converts device points → this page's points; the translation
-                    // re-centers rmc's x (0 = page middle) onto the page's left edge.
-                    let pdfAspect = pageW / pageH
-                    let s = pdfAspect >= deviceAspect ? pageW / canvasW : pageH / canvasH
-                    let tx = s * (viewBox.minX + canvasW / 2)
-                    let ty = pageH - (viewBox.minY + viewBox.height) * s
+                    let t = Self.annotationTransform(viewBox: viewBox,
+                                                     overlaySize: overlayPage.getBoxRect(.mediaBox).size,
+                                                     pageW: pageW, pageH: pageH,
+                                                     landscape: archive.isLandscape)
                     ctx.saveGState()
                     // The overlay has a white background; multiply makes white vanish
                     // while keeping the ink, so the PDF beneath shows through.
                     ctx.setBlendMode(.multiply)
-                    ctx.concatenate(CGAffineTransform(a: s, b: 0, c: 0, d: s, tx: tx, ty: ty))
+                    ctx.concatenate(t)
                     ctx.drawPDFPage(overlayPage)
                     ctx.restoreGState()
                 }
@@ -175,6 +166,52 @@ final class NotebookRenderer {
         let parts = vb.split(whereSeparator: { $0 == " " || $0 == "," }).compactMap { Double($0) }
         guard parts.count == 4 else { return nil }
         return CGRect(x: parts[0], y: parts[1], width: parts[2], height: parts[3])
+    }
+
+    /// Affine transform mapping the rmc-rendered ink overlay onto the source PDF page,
+    /// reproducing how the reMarkable lays the document out on its screen.
+    ///
+    /// rmc emits ink in PDF points in the device's *portrait* frame: x centered at 0
+    /// (page middle), y from the top, the full screen being `canvasW × canvasH`. The
+    /// overlay PDF page spans the SVG `viewBox`, so overlay point `(ox, oy)` (y-up,
+    /// origin bottom-left) corresponds to device point
+    ///   u = viewBox.minX + ox,  v = (viewBox.minY + height) − oy   (v measured from top).
+    ///
+    /// The device frame maps onto the page differently per orientation:
+    /// - **Portrait**: the page is fit to the screen *width* (`pageW / canvasW`) and
+    ///   anchored top-left; the page is generally taller than one screen and scrolls.
+    /// - **Landscape**: the page is rotated 90° clockwise, its width fit to the screen's
+    ///   *long* axis (`pageW / canvasH`) and centered on the short axis.
+    ///
+    /// Each step is affine, so we compose them by mapping three overlay basis points.
+    static func annotationTransform(viewBox: CGRect, overlaySize: CGSize,
+                                    pageW: CGFloat, pageH: CGFloat,
+                                    landscape: Bool) -> CGAffineTransform {
+        let canvasW = rmScreenW * rmScale
+        let canvasH = rmScreenH * rmScale
+        let overlayTop = viewBox.minY + overlaySize.height
+
+        // overlay (ox, oy) → source-PDF point (y-up).
+        func map(_ ox: CGFloat, _ oy: CGFloat) -> CGPoint {
+            let u = viewBox.minX + ox          // device x, centered at 0
+            let v = overlayTop - oy            // device y, from the top
+            let px: CGFloat, pyt: CGFloat      // page point, y from the top
+            if landscape {
+                let s = pageW / canvasH
+                px = pageW / 2 - (v - canvasH / 2) * s
+                pyt = pageH / 2 + u * s
+            } else {
+                let s = pageW / canvasW
+                px = (u + canvasW / 2) * s
+                pyt = v * s
+            }
+            return CGPoint(x: px, y: pageH - pyt)
+        }
+
+        let o = map(0, 0), x = map(1, 0), y = map(0, 1)
+        return CGAffineTransform(a: x.x - o.x, b: x.y - o.y,
+                                 c: y.x - o.x, d: y.y - o.y,
+                                 tx: o.x, ty: o.y)
     }
 
     // MARK: - Renderer setup

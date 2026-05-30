@@ -9,6 +9,10 @@ struct RMArchive {
     let pageUUIDs: [String]
     /// Source PDF embedded in the archive (the document was uploaded as PDF), if any.
     let embeddedPDF: URL?
+    /// How the reMarkable displays the document ("portrait" or "landscape", from
+    /// .content). Landscape rotates the annotation frame 90° relative to the PDF page,
+    /// so compositing must account for it. Defaults to portrait when absent.
+    let isLandscape: Bool
 
     init(directory: URL) throws {
         self.directory = directory
@@ -35,6 +39,7 @@ struct RMArchive {
             pages = oldPages
         }
         self.pageUUIDs = pages
+        self.isLandscape = (json["orientation"] as? String) == "landscape"
 
         // Metadata file → visibleName
         var name = self.docUUID
