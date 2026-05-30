@@ -9,6 +9,13 @@ import PDFKit
 final class NotebookRenderer {
     static let shared = NotebookRenderer()
 
+    // reMarkable screen geometry, matching rmc/rmscene's SVG output. The device
+    // screen is 1404×1872 px at 226 dpi; rmc emits ink in PDF points (px × 72/226)
+    // with x centered at 0 (page middle) and y starting at the top.
+    private static let rmScreenW: CGFloat = 1404
+    private static let rmScreenH: CGFloat = 1872
+    private static let rmScale: CGFloat = 72.0 / 226.0
+
     private var appSupportDir: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return base.appendingPathComponent("tinyreMarkable", isDirectory: true)
@@ -74,6 +81,100 @@ final class NotebookRenderer {
         guard outDoc.write(to: outURL) else {
             throw NSError(domain: "NotebookRenderer", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to write rendered PDF."])
         }
+    }
+
+    /// Composite handwritten annotations onto an embedded source PDF. For each
+    /// requested page the original PDF page is drawn first, then the page's `.rm`
+    /// ink (rendered via rmc → SVG → PDF) is overlaid, scaled and positioned to
+    /// match how the reMarkable fit the PDF onto its screen. Pages without ink are
+    /// copied through unchanged. `pageIndices == nil` means every page.
+    func compositeAnnotatedPDF(archive: RMArchive, sourcePDF: URL, to outURL: URL, pageIndices: [Int]? = nil, progress: @escaping (String) -> Void) async throws {
+        try await ensureRendererInstalled(progress: progress)
+
+        guard let srcDoc = PDFDocument(url: sourcePDF) else {
+            throw NSError(domain: "NotebookRenderer", code: 20, userInfo: [NSLocalizedDescriptionKey: "Could not open the source PDF."])
+        }
+        let workDir = archive.directory.appendingPathComponent("svg-out", isDirectory: true)
+        try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+
+        let targets = pageIndices ?? Array(archive.pageUUIDs.indices)
+        let total = targets.count
+
+        guard let consumer = CGDataConsumer(url: outURL as CFURL),
+              let ctx = CGContext(consumer: consumer, mediaBox: nil, nil) else {
+            throw NSError(domain: "NotebookRenderer", code: 21, userInfo: [NSLocalizedDescriptionKey: "Could not create the output PDF."])
+        }
+
+        // Device canvas in PDF points, and its aspect ratio.
+        let canvasW = Self.rmScreenW * Self.rmScale
+        let canvasH = Self.rmScreenH * Self.rmScale
+        let deviceAspect = Self.rmScreenW / Self.rmScreenH
+
+        var completed = 0
+        for pageIndex in targets {
+            try Task.checkCancellation()
+            guard pageIndex >= 0, pageIndex < srcDoc.pageCount, let srcPage = srcDoc.page(at: pageIndex) else { continue }
+
+            // Page size as shown on the device (rotation-adjusted).
+            let bounds = srcPage.bounds(for: .mediaBox)
+            let rotated = abs(srcPage.rotation % 180) == 90
+            let pageW = rotated ? bounds.height : bounds.width
+            let pageH = rotated ? bounds.width : bounds.height
+
+            var mediaBox = CGRect(x: 0, y: 0, width: pageW, height: pageH)
+            ctx.beginPage(mediaBox: &mediaBox)
+
+            // 1) The original PDF page (vector, rotation-aware).
+            srcPage.draw(with: .mediaBox, to: ctx)
+
+            // 2) The handwritten ink for this page, if any.
+            let pageUUID = pageIndex < archive.pageUUIDs.count ? archive.pageUUIDs[pageIndex] : nil
+            if let pageUUID, let rm = archive.rmFile(for: pageUUID) {
+                let svg = workDir.appendingPathComponent("\(pageUUID).svg")
+                try await runRmc(input: rm, output: svg)
+                if let overlayData = try await renderSVGToPDFData(svgURL: svg),
+                   let overlayDoc = CGPDFDocument(CGDataProvider(data: overlayData as CFData)!),
+                   let overlayPage = overlayDoc.page(at: 1),
+                   let viewBox = svgViewBox(svg) {
+                    // The reMarkable fits the PDF to its screen by the dominant edge
+                    // (height for portrait, width for landscape) and top-left-aligns it.
+                    // `s` converts device points → this page's points; the translation
+                    // re-centers rmc's x (0 = page middle) onto the page's left edge.
+                    let pdfAspect = pageW / pageH
+                    let s = pdfAspect >= deviceAspect ? pageW / canvasW : pageH / canvasH
+                    let tx = s * (viewBox.minX + canvasW / 2)
+                    let ty = pageH - (viewBox.minY + viewBox.height) * s
+                    ctx.saveGState()
+                    // The overlay has a white background; multiply makes white vanish
+                    // while keeping the ink, so the PDF beneath shows through.
+                    ctx.setBlendMode(.multiply)
+                    ctx.concatenate(CGAffineTransform(a: s, b: 0, c: 0, d: s, tx: tx, ty: ty))
+                    ctx.drawPDFPage(overlayPage)
+                    ctx.restoreGState()
+                }
+            }
+
+            ctx.endPage()
+            completed += 1
+            progress("Rendered \(completed) of \(total) pages…")
+        }
+
+        ctx.closePDF()
+
+        guard completed > 0 else {
+            throw NSError(domain: "NotebookRenderer", code: 22, userInfo: [NSLocalizedDescriptionKey: "No pages produced from the annotated PDF."])
+        }
+    }
+
+    /// The SVG's `viewBox` as a rect (origin = absolute min x/y in points, plus size).
+    /// rmc always emits at least the full screen, so this locates the ink in page space.
+    private func svgViewBox(_ svgURL: URL) -> CGRect? {
+        guard let data = try? Data(contentsOf: svgURL),
+              let svg = String(data: data, encoding: .utf8),
+              let vb = firstAttr("viewBox", in: svg) else { return nil }
+        let parts = vb.split(whereSeparator: { $0 == " " || $0 == "," }).compactMap { Double($0) }
+        guard parts.count == 4 else { return nil }
+        return CGRect(x: parts[0], y: parts[1], width: parts[2], height: parts[3])
     }
 
     // MARK: - Renderer setup
@@ -185,6 +286,14 @@ final class NotebookRenderer {
     }
 
     private func renderSVGToPDFPage(svgURL: URL) async throws -> PDFPage? {
+        guard let data = try await renderSVGToPDFData(svgURL: svgURL) else { return nil }
+        return PDFDocument(data: data)?.page(at: 0)
+    }
+
+    /// Render an SVG to a one-page PDF and return its raw data. Used by the annotated-PDF
+    /// compositor, which needs the data to back a `CGPDFDocument` it keeps alive while
+    /// drawing (a bare `PDFPage` whose document has been freed can't be drawn reliably).
+    private func renderSVGToPDFData(svgURL: URL) async throws -> Data? {
         let svgData = try Data(contentsOf: svgURL)
         guard let svgString = String(data: svgData, encoding: .utf8) else { return nil }
 
@@ -201,7 +310,7 @@ final class NotebookRenderer {
         // Use the SVG's viewBox to size the WKWebView so the whole drawing fits the PDF page.
         let (width, height) = svgViewBoxDimensions(svgString) ?? (595, 793)
 
-        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<PDFPage?, Error>) in
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data?, Error>) in
             let frame = NSRect(x: 0, y: 0, width: width, height: height)
             let config = WKWebViewConfiguration()
             let webView = WKWebView(frame: frame, configuration: config)
@@ -242,11 +351,11 @@ final class NotebookRenderer {
 private final class WebViewBridge: NSObject, WKNavigationDelegate {
     nonisolated(unsafe) static var key: UInt8 = 0
     private let webView: WKWebView
-    private let continuation: CheckedContinuation<PDFPage?, Error>
+    private let continuation: CheckedContinuation<Data?, Error>
     private let pageSize: NSSize
     private var didFinish = false
 
-    init(webView: WKWebView, continuation: CheckedContinuation<PDFPage?, Error>, pageSize: NSSize) {
+    init(webView: WKWebView, continuation: CheckedContinuation<Data?, Error>, pageSize: NSSize) {
         self.webView = webView
         self.continuation = continuation
         self.pageSize = pageSize
@@ -262,11 +371,7 @@ private final class WebViewBridge: NSObject, WKNavigationDelegate {
             webView.createPDF(configuration: config) { result in
                 switch result {
                 case .success(let data):
-                    if let pdf = PDFDocument(data: data), let page = pdf.page(at: 0) {
-                        self.continuation.resume(returning: page)
-                    } else {
-                        self.continuation.resume(returning: nil)
-                    }
+                    self.continuation.resume(returning: data)
                 case .failure(let err):
                     self.continuation.resume(throwing: err)
                 }

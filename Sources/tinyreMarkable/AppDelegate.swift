@@ -425,8 +425,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 case .embeddedPDF:
                     // makePDF returned the full PDF; slice out the one page.
                     try PDFSlicer.extractPages(from: source, indices: [idx], to: dst)
-                case .notebook:
-                    // makePDF rendered exactly this page; it's already a single-page PDF.
+                case .annotatedPDF, .notebook:
+                    // makePDF rendered/composited exactly this page; it's already a single-page PDF.
                     try copy(source, to: dst)
                 }
             } catch {

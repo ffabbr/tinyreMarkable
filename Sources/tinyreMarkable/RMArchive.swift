@@ -51,6 +51,13 @@ struct RMArchive {
         self.embeddedPDF = FileManager.default.fileExists(atPath: embedded.path) ? embedded : nil
     }
 
+    /// True when at least one page carries handwritten `.rm` strokes — i.e. the
+    /// document is an annotated PDF (embedded source PDF + ink) rather than a
+    /// plain uploaded PDF. Used to decide whether annotations must be composited.
+    var hasAnnotations: Bool {
+        pageUUIDs.contains { rmFile(for: $0) != nil }
+    }
+
     /// Path to a page's .rm file (may not exist if the page has no annotations / strokes).
     func rmFile(for pageUUID: String) -> URL? {
         let url = directory

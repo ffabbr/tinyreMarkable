@@ -7,8 +7,11 @@ import PDFKit
 /// need (handwritten notebooks are expensive to render per page).
 struct PreparedDocument {
     enum Source {
-        /// Uploaded/annotated PDF: a complete PDF already exists on disk.
+        /// Plain uploaded PDF (no handwriting): a complete PDF already exists on disk.
         case embeddedPDF(URL)
+        /// Uploaded PDF with handwritten annotations on top: the source PDF plus the
+        /// archive's per-page `.rm` strokes, which must be rendered and composited.
+        case annotatedPDF(pdf: URL, archive: RMArchive)
         /// Pure handwritten notebook: pages must be rendered on demand.
         case notebook(RMArchive)
     }
@@ -462,7 +465,13 @@ final class RMClient: ObservableObject {
         let archive = try RMArchive(directory: unzipped)
         if let embedded = archive.embeddedPDF {
             let count = PDFDocument(url: embedded)?.pageCount ?? archive.pageUUIDs.count
-            return PreparedDocument(source: .embeddedPDF(embedded), pageCount: count, name: archive.visibleName)
+            // If the user wrote on the PDF, the ink lives in per-page `.rm` files
+            // alongside the source PDF; it must be rendered and composited on export.
+            // A plain uploaded PDF with no strokes skips that and exports as-is.
+            let source: PreparedDocument.Source = archive.hasAnnotations
+                ? .annotatedPDF(pdf: embedded, archive: archive)
+                : .embeddedPDF(embedded)
+            return PreparedDocument(source: source, pageCount: count, name: archive.visibleName)
         }
         return PreparedDocument(source: .notebook(archive), pageCount: archive.pageUUIDs.count, name: archive.visibleName)
     }
@@ -474,6 +483,14 @@ final class RMClient: ObservableObject {
         switch doc.source {
         case .embeddedPDF(let url):
             return url
+        case .annotatedPDF(let pdf, let archive):
+            // Render the handwritten strokes for the requested pages and composite
+            // them onto the source PDF. Produces exactly the requested pages, so the
+            // caller copies the result directly (no further slicing).
+            let suffix = pageIndices == nil ? "annotated" : "annotated-\(pageIndices!.map(String.init).joined(separator: "-"))"
+            let outURL = destinationDir.appendingPathComponent("\(doc.name).\(suffix).pdf")
+            try await NotebookRenderer.shared.compositeAnnotatedPDF(archive: archive, sourcePDF: pdf, to: outURL, pageIndices: pageIndices, progress: progress)
+            return outURL
         case .notebook(let archive):
             let suffix = pageIndices == nil ? "rendered" : "rendered-\(pageIndices!.map(String.init).joined(separator: "-"))"
             let outURL = destinationDir.appendingPathComponent("\(doc.name).\(suffix).pdf")
