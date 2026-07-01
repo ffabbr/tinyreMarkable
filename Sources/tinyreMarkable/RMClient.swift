@@ -40,7 +40,7 @@ enum RMError: LocalizedError {
         case .authExpired:
             return "Your reMarkable session has expired. Open the reMarkable desktop app to sign in again, then retry."
         case .notebookNotRenderable(let name):
-            return "“\(name)” is a handwritten notebook with no source PDF. Exporting handwritten notebooks to PDF isn’t supported yet — annotated PDFs work fine. Workaround: open the notebook in the reMarkable desktop app and use File → Export."
+            return "“\(name)” couldn’t be rendered to PDF — its handwriting data is in a format this app can’t process. Workaround: open it in the reMarkable desktop app and use File → Export."
         case .notFound(let path):
             return "Could not find “\(path)” on your reMarkable."
         case .rmapiFailed(let stderr):

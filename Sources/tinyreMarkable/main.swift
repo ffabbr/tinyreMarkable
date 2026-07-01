@@ -1,5 +1,4 @@
 import AppKit
-import SwiftUI
 
 MainActor.assumeIsolated {
     let delegate = AppDelegate()
