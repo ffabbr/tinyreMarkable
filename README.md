@@ -25,9 +25,7 @@ Grab the latest `.dmg` from
 [Releases](https://github.com/ffabbr/tinyreMarkable/releases) and drag
 **Tiny reMarkable** to **Applications**.
 
-The app is only ad-hoc signed (no paid Apple Developer ID), so Gatekeeper warns
-on first launch. Right-click the app → **Open**, then confirm. You might also need to confirm in macOS settings under privacy. If macOS instead
-says the app is *"damaged"*, clear the quarantine flag once: `xattr -dr com.apple.quarantine "/Applications/Tiny reMarkable.app"`
+macOS might show a security warning the first time. In that case, go to System Settings > Privacy and Security, scroll down and click open.
 
 ## License & credits
 
