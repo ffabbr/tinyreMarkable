@@ -1,12 +1,8 @@
 # Tiny reMarkable
 
 A macOS menu bar app for uploading PDFs (and images) to your reMarkable tablet
-and downloading documents back as PDF — whole file or single pages — via the
-reMarkable cloud. Handwriting you added on top of an uploaded PDF is included in
-the export.
-
-macOS 13+, Apple Silicon & Intel. (Swift package / target: `tinyreMarkable`; the
-shipped app is **Tiny reMarkable**.)
+and downloading documents back as PDF via the
+reMarkable cloud. 
 
 ## How it works
 
@@ -30,31 +26,8 @@ Grab the latest `.dmg` from
 **Tiny reMarkable** to **Applications**.
 
 The app is only ad-hoc signed (no paid Apple Developer ID), so Gatekeeper warns
-on first launch. Right-click the app → **Open**, then confirm. If macOS instead
-says the app is *"damaged"*, clear the quarantine flag once:
-
-    xattr -dr com.apple.quarantine "/Applications/Tiny reMarkable.app"
-
-## Run from source
-
-    swift run
-
-Then click the reMarkable logo in the menu bar:
-
-- **Upload PDF to …** (or drag a PDF/image onto the menu bar icon).
-- Per document: **Save as PDF (all pages)**, the **first / last /
-  second-to-last** page, or **Other ▸** to pick one of the first 50 pages.
-- A busy bar shows while an operation runs; the menu offers **Cancel**.
-
-## Notes
-
-- The right rmapi build is fetched per-arch at runtime, so no universal binary
-  is needed. The first cloud action needs an internet connection (one-time).
-- Rendering handwriting needs Python 3.10+; the `rmc` virtualenv is
-  auto-installed once, on the first export that contains ink.
-- **Packaging**: `packaging/package.sh [version]` builds `Tiny reMarkable.app`,
-  ad-hoc signs it, and produces a styled DMG. `packaging/make_icon.swift`
-  regenerates the icon.
+on first launch. Right-click the app → **Open**, then confirm. You might also need to confirm in macOS settings under privacy. If macOS instead
+says the app is *"damaged"*, clear the quarantine flag once: `xattr -dr com.apple.quarantine "/Applications/Tiny reMarkable.app"`
 
 ## License & credits
 
